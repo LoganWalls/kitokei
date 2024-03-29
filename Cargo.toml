@@ -21,6 +21,7 @@ cc="*"
 
 
 [features]
+default = ["all-languages"]
 all-languages = ["rust", "python"]
 python = ["dep:tree-sitter-python"]
 rust = ["dep:tree-sitter-rust"]
