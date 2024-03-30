@@ -1,5 +1,4 @@
 {
-  description = "A minimal reference manager";
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     rust-overlay = {
@@ -38,7 +37,7 @@
             pkgs.libiconv
           ]);
         crate = craneLib.buildPackage {
-          src = craneLib.cleanCargoSource (craneLib.path ./.);
+          src = craneLib.path ./.;
           strictDeps = true;
           buildInputs = buildDeps;
         };

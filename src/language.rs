@@ -1,6 +1,35 @@
 use anyhow::Result;
 use std::path::Path;
 
+macro_rules! gated_match {
+    ($input:ident, $( ($lang:ident, $feature:expr, $body:expr) ),* $(,)?)  => {
+        match $input {
+            $(
+                #[cfg(feature = $feature)]
+                Self::$lang => Ok(($body)),
+            )*
+            #[cfg(not(feature = "all-languages"))]
+            lang => {
+                Err(anyhow::anyhow!(
+                    "This copy of kitokei was not built with '{}' support",
+                    lang.name()
+                ))
+            },
+        }
+    };
+}
+
+macro_rules! queries_for {
+    ($lang:literal) => {
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/external/zed/queries/",
+            $lang,
+            "/highlights.scm"
+        ))
+    };
+}
+
 pub enum Language {
     Python,
     Rust,
@@ -15,39 +44,19 @@ impl Language {
     }
 
     pub fn tree_sitter_language(&self) -> Result<tree_sitter::Language> {
-        match self {
-            #[cfg(feature = "python")]
-            Self::Python => Ok(tree_sitter_python::language()),
-            #[cfg(feature = "rust")]
-            Self::Rust => Ok(tree_sitter_rust::language()),
-            #[cfg(not(feature = "all-languages"))]
-            lang => {
-                Err(anyhow::anyhow!(
-                    "Feature flag for '{}' not enabled",
-                    lang.name()
-                ))
-            }
-        }
+        gated_match!(
+            self,
+            (Python, "python", tree_sitter_python::language()),
+            (Rust, "rust", tree_sitter_rust::language()),
+        )
     }
 
     pub fn queries(&self) -> Result<&'static str> {
-        match self {
-            #[cfg(feature = "python")]
-            Self::Python => {
-                Ok(include_str!("../external/nvim-treesitter/queries/python/highlights.scm"))
-            }
-            #[cfg(feature = "rust")]
-            Self::Rust => {
-                Ok(include_str!("../external/nvim-treesitter/queries/rust/highlights.scm"))
-            }
-            #[cfg(not(feature = "all-languages"))]
-            lang => {
-                Err(anyhow::anyhow!(
-                    "Feature flag for '{}' not enabled",
-                    lang.name()
-                ))
-            }
-        }
+        gated_match!(
+            self,
+            (Python, "python", queries_for!("python")),
+            (Rust, "rust", queries_for!("rust")),
+        )
     }
 }
 

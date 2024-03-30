@@ -19,7 +19,6 @@ tree-sitter-rust = { version = "0.20", optional = true }
 [build-dependencies]
 cc="*"
 
-
 [features]
 default = ["all-languages"]
 all-languages = ["rust", "python"]
