@@ -1,6 +1,8 @@
 use clap::{Parser, ValueHint};
 use ignore::WalkBuilder;
 use kitokei::{combine_counts, parse_file};
+use rayon::prelude::*;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::mpsc;
 
@@ -55,6 +57,7 @@ fn main() -> anyhow::Result<()> {
 
             let counts = path_rx
                 .into_iter()
+                .par_bridge()
                 .filter_map(|entry| match kitokei::parse_file(entry.path()) {
                     Ok(counts) => Some(counts),
                     Err(error) => {
@@ -64,8 +67,7 @@ fn main() -> anyhow::Result<()> {
                         None
                     }
                 })
-                .reduce(combine_counts)
-                .ok_or_else(|| anyhow::anyhow!("No files to analyze"))?;
+                .reduce(HashMap::new, combine_counts);
 
             let table = kitokei::table(counts);
             println!("{}", table);
