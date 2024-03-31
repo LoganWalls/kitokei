@@ -1,8 +1,7 @@
 use clap::{Parser, ValueHint};
 use ignore::WalkBuilder;
 use kitokei::{combine_counts, parse_file};
-use std::{collections::HashMap, path::PathBuf};
-use tokio::task::JoinSet;
+use std::path::PathBuf;
 
 /// Parse and query a file or directory with tree-sitter and report the number of times each query
 /// is matched
@@ -20,8 +19,7 @@ struct Args {
     skipped: bool,
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     if !args.path.exists() {
         return Err(anyhow::anyhow!("Path does not exist"));
@@ -29,46 +27,34 @@ async fn main() -> anyhow::Result<()> {
 
     match args.path {
         path if args.path.is_file() => {
-            let counts = parse_file(&path).await?;
+            let counts = parse_file(&path)?;
             let table = kitokei::table(counts);
             println!("{}", table);
         }
         path if args.path.is_dir() => {
-            let mut set = JoinSet::new();
             // TODO: look into WalkBuilder::build_parallel
-            WalkBuilder::new(path).build().for_each(|e| match e {
-                Ok(v) if v.path().is_file() => {
-                    set.spawn(async move { kitokei::parse_file(v.path()).await });
-                }
-                Err(error) => {
-                    println!("{}", error);
-                }
-                _ => {}
-            });
-
-            let mut reduced_counts = HashMap::new();
-            while let Some(result) = set.join_next().await {
-                match result {
-                    Ok(Ok(counts)) => {
-                        reduced_counts = combine_counts(reduced_counts, counts);
-                    }
-                    Ok(Err(error)) => {
-                        if args.skipped {
-                            println!("Skipped: {}", error);
+            let counts = WalkBuilder::new(path)
+                .build()
+                .filter_map(|e| match e {
+                    Ok(v) if v.path().is_file() => match kitokei::parse_file(v.path()) {
+                        Ok(counts) => Some(counts),
+                        Err(error) => {
+                            if args.skipped {
+                                println!("Skipped: {}", error);
+                            }
+                            None
                         }
-                    }
+                    },
                     Err(error) => {
-                        set.abort_all();
-                        anyhow::bail!(error);
+                        println!("{}", error);
+                        None
                     }
-                }
-            }
+                    _ => None,
+                })
+                .reduce(combine_counts)
+                .ok_or_else(|| anyhow::anyhow!("No files to analyze"))?;
 
-            if reduced_counts.is_empty() {
-                anyhow::bail!("No files to analyze");
-            }
-
-            let table = kitokei::table(reduced_counts);
+            let table = kitokei::table(counts);
             println!("{}", table);
         }
         _ => return Err(anyhow::anyhow!("Path is not a file or directory")),

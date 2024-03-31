@@ -12,7 +12,7 @@ use tree_sitter::QueryCursor;
 use self::language::Language;
 
 /// Parse a file and return the counts of each capture group
-pub async fn parse_file(path: &Path) -> Result<HashMap<String, usize>> {
+pub fn parse_file(path: &Path) -> Result<HashMap<String, usize>> {
     let mut parser = tree_sitter::Parser::new();
     let lang = Language::try_from(path)?;
     let ts_lang = lang.tree_sitter_language()?;
