@@ -2,6 +2,7 @@ use clap::{Parser, ValueHint};
 use ignore::WalkBuilder;
 use kitokei::{combine_counts, parse_file};
 use std::path::PathBuf;
+use std::sync::mpsc;
 
 /// Parse and query a file or directory with tree-sitter and report the number of times each query
 /// is matched
@@ -32,24 +33,36 @@ fn main() -> anyhow::Result<()> {
             println!("{}", table);
         }
         path if args.path.is_dir() => {
-            // TODO: look into WalkBuilder::build_parallel
-            let counts = WalkBuilder::new(path)
-                .build()
-                .filter_map(|e| match e {
-                    Ok(v) if v.path().is_file() => match kitokei::parse_file(v.path()) {
-                        Ok(counts) => Some(counts),
-                        Err(error) => {
-                            if args.skipped {
-                                println!("Skipped: {}", error);
+            let (path_tx, path_rx) = mpsc::sync_channel(2);
+
+            std::thread::spawn(move || {
+                WalkBuilder::new(path).build_parallel().run(|| {
+                    let tx = path_tx.clone();
+                    Box::new(move |e| {
+                        match e {
+                            Ok(v) if v.path().is_file() => {
+                                tx.send(v).expect("channel should be available to send");
                             }
-                            None
+                            Err(error) => {
+                                println!("{}", error);
+                            }
+                            _ => {}
                         }
-                    },
+                        ignore::WalkState::Continue
+                    })
+                });
+            });
+
+            let counts = path_rx
+                .into_iter()
+                .filter_map(|entry| match kitokei::parse_file(entry.path()) {
+                    Ok(counts) => Some(counts),
                     Err(error) => {
-                        println!("{}", error);
+                        if args.skipped {
+                            println!("Skipped: {}", error);
+                        }
                         None
                     }
-                    _ => None,
                 })
                 .reduce(combine_counts)
                 .ok_or_else(|| anyhow::anyhow!("No files to analyze"))?;
