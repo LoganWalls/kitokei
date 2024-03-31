@@ -1,48 +1,77 @@
 use anyhow::anyhow;
 use clap::{Parser, ValueHint};
-use kitokei::capture_counts;
-use kitokei::language::Language;
-use std::collections::HashMap;
+use ignore::WalkBuilder;
+use kitokei::{combine_counts, parse_file};
 use std::path::PathBuf;
+use tokio::task::JoinSet;
 
-/// Simple program to greet a person
+/// Parse and query a file or directory with tree-sitter and report the number of times each query
+/// is matched
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
     /// The path to the file or directory to analyze
-    #[arg(value_name = "PATH", value_hint = ValueHint::AnyPath)]
+    #[arg(
+        value_name = "PATH",
+        value_hint = ValueHint::AnyPath,
+        default_value = PathBuf::from(".").into_os_string())]
     path: PathBuf,
+    /// Show skipped files
+    #[arg(short, long)]
+    skipped: bool,
 }
 
-fn main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     if !args.path.exists() {
         return Err(anyhow::anyhow!("Path does not exist"));
     }
 
-    let mut parser = tree_sitter::Parser::new();
     match args.path {
         path if args.path.is_file() => {
-            let lang = Language::try_from(path.as_path())?;
-            let ts_lang = lang.tree_sitter_language()?;
-            parser.set_language(ts_lang)?;
-            let query = tree_sitter::Query::new(ts_lang, lang.queries()?)?;
-            let code = std::fs::read_to_string(&path)?;
-            let tree = parser
-                .parse(&code, None)
-                .ok_or_else(|| anyhow!("Failed to parse file"))?;
-
-            let capture_names = query.capture_names();
-            let counts = capture_counts(&query, tree.root_node(), &code)
-                .into_iter()
-                .map(|(k, v)| (capture_names[k].as_str(), v))
-                .collect::<HashMap<_, _>>();
+            let counts = parse_file(&path).await?;
             let table = kitokei::table(counts);
             println!("{}", table);
         }
-        _ => {
-            unimplemented!("Directory analysis not implemented");
+        path if args.path.is_dir() => {
+            let mut set = JoinSet::new();
+            // TODO: look into WalkBuilder::build_parallel
+            WalkBuilder::new(path).build().for_each(|e| match e {
+                Ok(v) if v.path().is_file() => {
+                    set.spawn(async move { kitokei::parse_file(v.path()).await });
+                }
+                Err(error) => {
+                    println!("{}", error);
+                }
+                _ => {}
+            });
+            let mut all_counts = Vec::new();
+            while let Some(result) = set.join_next().await {
+                match result {
+                    Ok(Ok(counts)) => {
+                        all_counts.push(counts);
+                    }
+                    Ok(Err(error)) => {
+                        if args.skipped {
+                            println!("Skipped: {}", error);
+                        }
+                    }
+                    Err(error) => {
+                        set.abort_all();
+                        anyhow::bail!(error);
+                    }
+                }
+            }
+            let table = kitokei::table(
+                all_counts
+                    .into_iter()
+                    .reduce(combine_counts)
+                    .ok_or_else(|| anyhow!("No files to analyze"))?,
+            );
+            println!("{}", table);
         }
+        _ => return Err(anyhow::anyhow!("Path is not a file or directory")),
     }
     Ok(())
 }

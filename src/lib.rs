@@ -1,11 +1,33 @@
 pub mod language;
 
+use anyhow::{anyhow, Result};
 use comfy_table::modifiers::{UTF8_ROUND_CORNERS, UTF8_SOLID_INNER_BORDERS};
 use comfy_table::presets::UTF8_FULL;
 use comfy_table::{ContentArrangement, Table};
 use itertools::Itertools;
 use std::collections::HashMap;
+use std::path::Path;
 use tree_sitter::QueryCursor;
+
+use self::language::Language;
+
+/// Parse a file and return the counts of each capture group
+pub async fn parse_file(path: &Path) -> Result<HashMap<String, usize>> {
+    let mut parser = tree_sitter::Parser::new();
+    let lang = Language::try_from(path)?;
+    let ts_lang = lang.tree_sitter_language()?;
+    parser.set_language(ts_lang)?;
+    let query = tree_sitter::Query::new(ts_lang, lang.queries()?)?;
+    let code = std::fs::read_to_string(path)?;
+    let tree = parser
+        .parse(&code, None)
+        .ok_or_else(|| anyhow!("Failed to parse file"))?;
+    let capture_names = query.capture_names();
+    Ok(capture_counts(&query, tree.root_node(), &code)
+        .into_iter()
+        .map(|(k, v)| (capture_names[k].to_string(), v))
+        .collect::<HashMap<_, _>>())
+}
 
 /// Count the number of times each capture group was matched by `query`
 pub fn capture_counts(
@@ -23,10 +45,10 @@ pub fn capture_counts(
 }
 
 /// Combine the counts of two maps
-pub fn combine_counts(
-    mut counts: HashMap<usize, usize>,
-    new_counts: HashMap<usize, usize>,
-) -> HashMap<usize, usize> {
+pub fn combine_counts<K: std::hash::Hash + std::cmp::Eq>(
+    mut counts: HashMap<K, usize>,
+    new_counts: HashMap<K, usize>,
+) -> HashMap<K, usize> {
     for (k, v) in new_counts {
         *counts.entry(k).or_insert(0) += v;
     }
@@ -34,7 +56,7 @@ pub fn combine_counts(
 }
 
 /// Pretty print a table of counts
-pub fn table(counts: HashMap<&str, usize>) -> Table {
+pub fn table<T: ToString + std::cmp::Ord>(counts: HashMap<T, usize>) -> Table {
     let mut table = Table::new();
     table
         .load_preset(UTF8_FULL)
@@ -47,9 +69,9 @@ pub fn table(counts: HashMap<&str, usize>) -> Table {
             counts
                 .into_iter()
                 .sorted()
-                .filter_map(|(item, count)| match item {
-                    _ if item.starts_with('_') => None,
-                    _ => Some([item.to_string(), count.to_string()]),
+                .filter_map(|(item, count)| match item.to_string() {
+                    s if s.starts_with('_') => None,
+                    s => Some([s, count.to_string()]),
                 }),
         );
     table

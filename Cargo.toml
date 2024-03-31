@@ -8,10 +8,12 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.81"
 arrow-array = "51.0.0"
-clap = { version = "4.5.4", features = ["derive"] }
+clap = { version = "4.5.4", features = ["derive", "string"] }
 comfy-table = "7.1.0"
+ignore = { version = "0.4.22", features = ["simd-accel"] }
 itertools = "0.12.1"
 parquet = "51.0.0"
+tokio = { version = "1.37.0", features = ["macros", "rt-multi-thread"] }
 tree-sitter = "0.20"
 tree-sitter-python = { version = "0.20", optional = true }
 tree-sitter-rust = { version = "0.20", optional = true }

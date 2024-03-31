@@ -65,13 +65,16 @@ impl TryFrom<&Path> for Language {
     fn try_from(path: &Path) -> Result<Self, Self::Error> {
         let extension = path
             .extension()
-            .ok_or_else(|| anyhow::anyhow!("{path:?} has no file extension"))?
+            .ok_or_else(|| anyhow::anyhow!("{} has no file extension", path.display()))?
             .to_str()
             .expect("str compatible extension");
         match extension {
             "py" => Ok(Self::Python),
             "rs" => Ok(Self::Rust),
-            _ => Err(anyhow::anyhow!("Unsupported extension: {}", extension)),
+            _ => Err(anyhow::anyhow!(
+                "{} has unsupported extension",
+                path.display()
+            )),
         }
     }
 }
