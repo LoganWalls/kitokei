@@ -30,6 +30,7 @@ macro_rules! queries_for {
     };
 }
 
+#[derive(Hash, Eq, PartialEq, Debug, Clone, Copy)]
 pub enum Language {
     Python,
     Rust,

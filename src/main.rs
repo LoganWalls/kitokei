@@ -1,10 +1,13 @@
 use clap::{Parser, ValueHint};
+use dashmap::DashMap;
 use ignore::WalkBuilder;
 use kitokei::{combine_counts, parse_file};
 use rayon::prelude::*;
 use std::collections::HashMap;
+use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::sync::mpsc;
+use std::thread::available_parallelism;
 
 /// Parse and query a file or directory with tree-sitter and report the number of times each query
 /// is matched
@@ -27,16 +30,19 @@ fn main() -> anyhow::Result<()> {
     if !args.path.exists() {
         return Err(anyhow::anyhow!("Path does not exist"));
     }
-
+    let query_cache = DashMap::new();
     match args.path {
         path if args.path.is_file() => {
-            let counts = parse_file(&path)?;
+            let counts = parse_file(&path, &query_cache)?;
             let table = kitokei::table(counts);
             println!("{}", table);
         }
         path if args.path.is_dir() => {
-            let (path_tx, path_rx) = mpsc::sync_channel(2);
-
+            let (path_tx, path_rx) = mpsc::sync_channel(
+                available_parallelism()
+                    .unwrap_or(NonZeroUsize::new(2).unwrap())
+                    .get(),
+            );
             std::thread::spawn(move || {
                 WalkBuilder::new(path).build_parallel().run(|| {
                     let tx = path_tx.clone();
@@ -58,15 +64,17 @@ fn main() -> anyhow::Result<()> {
             let counts = path_rx
                 .into_iter()
                 .par_bridge()
-                .filter_map(|entry| match kitokei::parse_file(entry.path()) {
-                    Ok(counts) => Some(counts),
-                    Err(error) => {
-                        if args.skipped {
-                            println!("Skipped: {}", error);
+                .filter_map(
+                    |entry| match kitokei::parse_file(entry.path(), &query_cache) {
+                        Ok(counts) => Some(counts),
+                        Err(error) => {
+                            if args.skipped {
+                                println!("Skipped: {}", error);
+                            }
+                            None
                         }
-                        None
-                    }
-                })
+                    },
+                )
                 .reduce(HashMap::new, combine_counts);
 
             let table = kitokei::table(counts);

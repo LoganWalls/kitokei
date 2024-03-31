@@ -4,6 +4,7 @@ use anyhow::{anyhow, Result};
 use comfy_table::modifiers::{UTF8_ROUND_CORNERS, UTF8_SOLID_INNER_BORDERS};
 use comfy_table::presets::UTF8_FULL;
 use comfy_table::{ContentArrangement, Table};
+use dashmap::DashMap;
 use itertools::Itertools;
 use std::collections::HashMap;
 use std::path::Path;
@@ -12,12 +13,20 @@ use tree_sitter::QueryCursor;
 use self::language::Language;
 
 /// Parse a file and return the counts of each capture group
-pub fn parse_file(path: &Path) -> Result<HashMap<String, usize>> {
+pub fn parse_file(
+    path: &Path,
+    queries: &DashMap<Language, tree_sitter::Query>,
+) -> Result<HashMap<String, usize>> {
     let mut parser = tree_sitter::Parser::new();
     let lang = Language::try_from(path)?;
     let ts_lang = lang.tree_sitter_language()?;
     parser.set_language(ts_lang)?;
-    let query = tree_sitter::Query::new(ts_lang, lang.queries()?)?;
+    let query =
+        queries
+            .entry(lang)
+            .or_try_insert_with(|| -> Result<tree_sitter::Query> {
+                Ok(tree_sitter::Query::new(ts_lang, lang.queries()?)?)
+            })?;
     let code = std::fs::read_to_string(path)?;
     let tree = parser
         .parse(&code, None)
