@@ -1,8 +1,7 @@
-use anyhow::anyhow;
 use clap::{Parser, ValueHint};
 use ignore::WalkBuilder;
 use kitokei::{combine_counts, parse_file};
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 use tokio::task::JoinSet;
 
 /// Parse and query a file or directory with tree-sitter and report the number of times each query
@@ -46,11 +45,12 @@ async fn main() -> anyhow::Result<()> {
                 }
                 _ => {}
             });
-            let mut all_counts = Vec::new();
+
+            let mut reduced_counts = HashMap::new();
             while let Some(result) = set.join_next().await {
                 match result {
                     Ok(Ok(counts)) => {
-                        all_counts.push(counts);
+                        reduced_counts = combine_counts(reduced_counts, counts);
                     }
                     Ok(Err(error)) => {
                         if args.skipped {
@@ -63,12 +63,12 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
             }
-            let table = kitokei::table(
-                all_counts
-                    .into_iter()
-                    .reduce(combine_counts)
-                    .ok_or_else(|| anyhow!("No files to analyze"))?,
-            );
+
+            if reduced_counts.is_empty() {
+                anyhow::bail!("No files to analyze");
+            }
+
+            let table = kitokei::table(reduced_counts);
             println!("{}", table);
         }
         _ => return Err(anyhow::anyhow!("Path is not a file or directory")),
